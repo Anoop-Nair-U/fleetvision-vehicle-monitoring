@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>FleetVision – Live Telemetry</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.05); }
+        .title { font-weight: 700; margin-bottom: 8px; }
+        code { background: #f6f8fa; padding: 2px 6px; border-radius: 6px; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border-bottom: 1px solid #eee; padding: 6px; text-align: left; font-size: 14px; }
+    </style>
+</head>
+<body>
+<h2>FleetVision – Real-time Telemetry</h2>
+<p>Status: <span id="status">disconnected</span></p>
+
+<div class="grid">
+    <div class="card">
+        <div class="title">Live Telemetry Feed</div>
+        <table id="telemetry"><thead>
+        <tr><th>Vehicle</th><th>Speed</th><th>Fuel</th><th>Engine °C</th><th>Time</th></tr>
+        </thead><tbody></tbody></table>
+    </div>
+
+    <div class="card">
+        <div class="title">10s Window Metrics</div>
+        <table id="metrics"><thead>
+        <tr><th>Vehicle</th><th>Avg Speed</th><th>Max EngTemp</th><th>Last Fuel</th><th>Window</th></tr>
+        </thead><tbody></tbody></table>
+    </div>
+</div>
+
+<!-- STOMP + SockJS from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+<script>
+    const statusEl = document.getElementById('status');
+    const telemetryBody = document.querySelector('#telemetry tbody');
+    const metricsBody = document.querySelector('#metrics tbody');
+
+    function fmt(ts) {
+      try { return new Date(ts).toLocaleTimeString(); } catch { return '-'; }
+    }
+
+    function connect() {
+      const socket = new SockJS('/ws');
+      const client = Stomp.over(socket);
+      client.debug = null; // silence logs
+      client.connect({}, () => {
+        statusEl.textContent = 'connected';
+
+        client.subscribe('/topic/telemetry', msg => {
+          const t = JSON.parse(msg.body);
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td class="mono">${t.vehicleId}</td>
+            <td>${t.speed?.toFixed?.(1) ?? t.speed}</td>
+            <td>${t.fuelLevel?.toFixed?.(1) ?? t.fuelLevel}%</td>
+            <td>${t.engineTemp?.toFixed?.(1) ?? t.engineTemp}</td>
+            <td>${t.timestamp ? t.timestamp.replace('T',' ') : '-'}</td>
+          `;
+          telemetryBody.prepend(row);
+          if (telemetryBody.rows.length > 20) telemetryBody.deleteRow(20);
+        });
+
+        client.subscribe('/topic/metrics', msg => {
+          const m = JSON.parse(msg.body);
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td class="mono">${m.vehicleId}</td>
+            <td>${m.avgSpeed.toFixed(1)}</td>
+            <td>${m.maxEngineTemp.toFixed(1)}</td>
+            <td>${m.lastFuelLevel.toFixed(1)}%</td>
+            <td>${fmt(m.windowStartEpochMs)}–${fmt(m.windowEndEpochMs)}</td>
+          `;
+          metricsBody.prepend(row);
+          if (metricsBody.rows.length > 20) metricsBody.deleteRow(20);
+        });
+      }, () => { statusEl.textContent = 'disconnected'; setTimeout(connect, 2000); });
+    }
+
+    connect();
+</script>
+</body>
+</html>
